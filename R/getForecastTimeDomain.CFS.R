@@ -19,10 +19,27 @@
 #' \end{itemize}
 #' @author J. Bedia \email{joaquin.bedia@@gmail.com} 
 #' 
-getForecastTimeDomain.CFS <- function (grid, dic, runTimePars, time) {
+getForecastTimeDomain.CFS <- function (grid, dic, runTimePars, time, aggr.d, aggr.m) {
       gcs <- grid$getCoordinateSystem()
       foreTimesList <- rep(list(bquote()), length(runTimePars$runTimeRanges)) 
       foreDatesList <- foreTimesList
+      timeResInSeconds <- gcs$getTimeAxisForRun(runTimePars$runTimeRanges[[1]][[1]]$element(0L))$getTimeResolution()$getValueInSeconds()
+      if ((aggr.d == "none") & (time == "DD") & ((timeResInSeconds / 3600) < 24)) {
+            stop("Data is sub-daily:\nA daily aggregation function must be indicated to perform daily aggregation")
+      }
+      # Si es MM hay que asegurarse de que se calcula sobre dato diario
+      if ((aggr.m != "none") & ((timeResInSeconds / 3600) < 24) & (time == "none")) {
+            stop("Data is sub-daily:\nA daily aggregation function must be indicated first to perform monthly aggregation")
+      }
+      if ((timeResInSeconds / 3600) == 24) {
+            time <- "DD"
+            if (aggr.d != "none") {
+                  aggr.d <- "none"
+                  message("NOTE: The original data is daily: argument 'aggr.d' ignored")
+            }
+      }
+      if (aggr.d != "none") message("NOTE: Daily aggregation will be computed from ", timeResInSeconds / 3600, "-hourly data")
+      if (aggr.m != "none") message("NOTE: Daily data will be monthly aggregated")
       for (x in 1:length(runTimePars$runTimeRanges)) {
             aux.foreTimesList <- rep(list(bquote()), length(runTimePars$runTimeRanges[[x]]))
             aux.foreDatesList <- aux.foreTimesList
@@ -48,6 +65,7 @@ getForecastTimeDomain.CFS <- function (grid, dic, runTimePars, time) {
             init <- do.call("max", aux.dates)
             for (i in 1:length(foreTimesList)) {
                   if(head(foreDatesList[[i]][[1]], 1) < init) {
+                        message("NOTE: some forecast times at the beginning of the initialization may be lost so all members have equal length")
                         for (j in 1:length(foreTimesList[[i]])) {
                               retain <- which(foreDatesList[[i]][[1]] >= init)
                               foreTimesList[[i]][[j]] <- foreTimesList[[i]][[j]][retain] 
@@ -56,54 +74,26 @@ getForecastTimeDomain.CFS <- function (grid, dic, runTimePars, time) {
                   }
             }
       }
-      aux.dates <- aux <- NULL
+      aux <- aux.dates <- NULL
       # Sub-routine for setting stride and shift along time dimension    
-      if (is.null(dic) & time != "none") {
-            stop("Time resolution especification incompatible with non-standard variable requests\nUse the dictionary or set the 'time' argument to NULL")
-      }
-      if (is.null(dic) | isTRUE(dic$doDailyMean)) {
+      if (time == "DD" | time == "none") {
             foreTimeStride <- 1L
             foreTimeShift <- 0L
       } else {
-            if (time == "DD" | time == "none") {
-                  foreTimeStride <- 1L
-                  foreTimeShift <- 0L
-            } else {
-                  time <- as.integer(time)
-                  timeInd <- which(foreDatesList[[1]][[1]]$hour == time)
-                  if (length(timeInd) == 0) {
-                        stop("Non-existing verification time selected.\nCheck value of argument 'time'")
-                  }
-                  for (i in 1:length(foreDatesList)) {
-                        for (j in 1:length(foreDatesList[[i]])) {
-                              foreDatesList[[i]][[j]] <- foreDatesList[[i]][[j]][timeInd]      
-                        }
-                  }
-                  foreTimeStride <- as.integer(diff(timeInd)[1])
-                  foreTimeShift <- as.integer(-(timeInd[1]-1))
-                  timeInd <- NULL
+            time <- as.integer(time)
+            timeInd <- which(foreDatesList[[1]][[1]]$hour == time)
+            if (length(timeInd) == 0) {
+                  stop("Non-existing verification time selected.\nCheck value of argument 'time'")
             }
-      }
-      # Ensure matching for daily aggregation (full days only)
-      if(!is.na(dic$dailyAggr)) {
             for (i in 1:length(foreDatesList)) {
                   for (j in 1:length(foreDatesList[[i]])) {
-                        # Ensure foredates start at 00:00
-                        if (foreDatesList[[i]][[j]][1]$hour != 0) {
-                              start.ind <- which(foreDatesList[[i]][[j]]$hour == 0)[1]
-                              foreDatesList[[i]][[j]] <- foreDatesList[[i]][[j]][start:length(foreDatesList[[i]][[j]])]
-                        }
-                        # Ensure full days and remove uncomplete days if any at the end
-                        len <- length(foreDatesList[[i]][[j]]) 
-                        if (len %% 4 != 0) {
-                              ntail <- len %% 4
-                              foreDatesList[[i]][[j]] <- head(foreDatesList[[i]][[j]], n = len - ntail)
-                        }
+                        foreDatesList[[i]][[j]] <- foreDatesList[[i]][[j]][timeInd]      
                   }
             }
-      }                 
-      foreDates <- do.call("c", foreDatesList[[1]])
-      foreDatesList <- NULL
+            foreTimeStride <- as.integer(diff(timeInd)[1])
+            foreTimeShift <- as.integer(-(timeInd[1]-1))
+            timeInd <- NULL
+      }
       # Sub-routine for adjusting times in case of deaccumulation (unused so far in CFS)
       deaccumFromFirst <- NULL
       if (!is.null(dic)) {
@@ -120,9 +110,6 @@ getForecastTimeDomain.CFS <- function (grid, dic, runTimePars, time) {
                   }
             }
       }
-      # Sub-routine for calculation of time bounds
-      foreDates <- timeBounds(dic, foreDates)
-      # Java forecast time ranges list along rt axes
       for (i in 1:length(foreTimesList)) {
             for (j in 1:length(foreTimesList[[i]])) {
                   start <- as.integer(foreTimesList[[i]][[j]][1] - 1)
@@ -130,6 +117,7 @@ getForecastTimeDomain.CFS <- function (grid, dic, runTimePars, time) {
                   foreTimesList[[i]][[j]] <- .jnew("ucar/ma2/Range", start, end, foreTimeStride)$shiftOrigin(foreTimeShift)
             }
       }
-      return(list("forecastDates" = foreDates, "ForeTimeRangesList" = foreTimesList, "deaccumFromFirst" = deaccumFromFirst, "dailyAggr" = dic$dailyAggr))
+      return(list("forecastDates" = foreDatesList, "ForeTimeRangesList" = foreTimesList, "deaccumFromFirst" = deaccumFromFirst,
+                  "aggr.d" = aggr.d, "aggr.m" = aggr.m))
 }
 # End
