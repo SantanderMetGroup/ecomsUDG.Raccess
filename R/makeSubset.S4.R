@@ -8,6 +8,7 @@
 #' @param runTimePars A list of run time definition parameters, as returned by getRunTimeDomain
 #' @param memberRangeList A list of ensemble java ranges as returned by getMemberDomain.S4
 #' @param foreTimePars A list of forecast time definition parameters, as returned by getForecastTimeDomain.S4
+#' @param verticalPars A list with vertical level definition, as returned by \code{getVerticalLevelPars.ECOMS}. Only the last element (the kava index position) is used
 #' @return A list containing a n-dimensional array and the (possibly) modified foreTimePars object with the 
 #' corrected dates in case of time aggregations. Dimensions are labelled by the \dQuote{dimnames} attribute.
 #' @details Dimensions of length one are dropped and the \dQuote{dimnames} attribute is consequently modified.
@@ -17,11 +18,11 @@
 #' @references \url{http://www.unidata.ucar.edu/software/thredds/v4.3/netcdf-java/v4.3/javadocAll/ucar/nc2/dt/grid/GeoGrid.html}
 #' @author J Bedia \email{joaquin.bedia@@gmail.com} and A. Cofi\~no
 
-makeSubset.S4 <- function(grid, latLon, runTimePars, memberRangeList, foreTimePars) {
+makeSubset.S4 <- function(grid, latLon, runTimePars, memberRangeList, foreTimePars, verticalPars) {
       message("[", Sys.time(), "] Retrieving data subset ..." )
       gcs <- grid$getCoordinateSystem()
       dimNames <- rev(names(scanVarDimensions(grid))) # reversed!
-      z <- .jnew("ucar/ma2/Range", 0L, 0L)
+      z <- verticalPars$zRange
       aux.foreDatesList <- rep(list(foreTimePars$forecastDates), length(memberRangeList))      
       foreTimePars$forecastDates <- NULL
       aux.list <- rep(list(bquote()), length(memberRangeList))
@@ -52,7 +53,7 @@ makeSubset.S4 <- function(grid, latLon, runTimePars, memberRangeList, foreTimePa
                   aux.list1[[j]] <- do.call("abind", c(aux.list2, along = 1))
                   aux.list2 <- NULL
                   # Deaccumulator
-                  if (!is.null(foreTimePars$deaccumFromFirst)) {
+                  if (foreTimePars$deaccum) {
                         mar <- c(1:length(dim(aux.list1[[j]])))[-grep("^time", dimNamesRef)] 
                         aux.list1[[j]] <- apply(aux.list1[[j]], mar, diff)#deaccumulate, foreTimePars$deaccumFromFirst)
                         dimNamesRef <- c("time", dimNamesRef[grep("^time$", dimNamesRef, invert = TRUE)])
@@ -78,11 +79,28 @@ makeSubset.S4 <- function(grid, latLon, runTimePars, memberRangeList, foreTimePa
                         aux.list1[[j]] <- apply(aux.list1[[j]], MARGIN = mar, FUN = function(x) {
                               tapply(x, INDEX = mes, FUN = foreTimePars$aggr.m)
                         })
-                        dimNamesRef <- c("time", dimNamesRef[mar])
-                        aux.foreDatesList[[i]][[j]] <- aux.foreDatesList[[i]][[j]][which(day == 1)]
+                        dimNamesRef <- if (length(unique(mes)) > 1) {
+                              c("time", dimNamesRef[mar])
+                        } else {
+                              dimNamesRef[mar]
+                        }
+                        aux.foreDatesList[[i]][[j]] <- if (aux.foreDatesList[[i]][[j]][1]$mday == 2) { # case of lm0 precip
+                              append(aux.foreDatesList[[i]][[j]][1], aux.foreDatesList[[i]][[j]][which(day == 1)])
+                        } else {
+                              aux.foreDatesList[[i]][[j]][which(day == 1)]      
+                        }
                   }
-            }            
-            aux.list[[i]] <- do.call("abind", c(aux.list1, along = grep("^time", dimNamesRef)))
+            }
+            if (foreTimePars$aggr.m != "none") {
+                  if (length(unique(mes)) > 1) {
+                        aux.list[[i]] <- do.call("abind", c(aux.list1, along = grep("^time", dimNamesRef)))
+                  } else {
+                        aux.list[[i]] <- do.call("abind", c(aux.list1, along = -1L))
+                        dimNamesRef <- c("time", dimNamesRef)
+                  }
+            } else {
+                  aux.list[[i]] <- do.call("abind", c(aux.list1, along = grep("^time", dimNamesRef)))
+            }
             aux.list1 <- NULL
       }
       mdArray <- do.call("abind", c(aux.list, along = grep(gcs$getEnsembleAxis()$getDimensionsString(), dimNamesRef, fixed = TRUE)))
