@@ -1,6 +1,6 @@
 Package: ecomsUDG.Raccess
-Depends: downscaleR (>= 0.7.0), R(>= 3.0.0), rJava
-Imports: downscaleR.java (>= 1.0.0), utils, abind, RCurl
+Depends: loadeR (>= 0.0.1), R(>= 3.0.0), rJava
+Imports: loadeR.java (>= 1.0.0), utils, abind, RCurl
 Suggests: sp
 Type: Package
 Title: R interface to the ECOMS User Data Gateway
