@@ -1,3 +1,8 @@
+*THIS PACKAGE IS NO LONGER MAINTAINED. COMPATIBILITY WITH OTHER DEPENDENCIES IS NOT GUARANTEED*
+
+This package is superseded by [loadeR.ECOMS](https://github.com/SantanderMetGroup/loadeR.ECOMS)
+
+
 What is ecomsUDG.Raccess?
 =========================
 
